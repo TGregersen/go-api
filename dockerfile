@@ -4,8 +4,6 @@ WORKDIR $GOPATH/src
 
 COPY . .
 
-RUN yarn install --production
-
 RUN go mod download
 RUN go build -o ~/GIT
 
