@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.23.4
 
-WORKDIR $GOPATH/app
+WORKDIR $GOPATH/src
 
-RUN go build -o ~/GIT/receipts.go
-
-COPY go.mod go.sum ./
+COPY . .
 RUN go mod download
+RUN go build -o /receipts
 
-EXPOSE 8080
+EXPOSE 9000
 
-CMD ["~/GIT/receipts"]
+CMD ["/receipts"]

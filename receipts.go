@@ -16,8 +16,8 @@ import (
     "errors"
 )
 
-//Object to contain receipt JSON
-type Receipt struct{
+// Object to contain receipt JSON
+type Receipt struct {
 	Retailer string `json:"retailer"`
 	PurchaseDate string `json:"purchaseDate"`
 	PurchaseTime string `json:"purchaseTime"`
@@ -25,20 +25,23 @@ type Receipt struct{
 	Items []Item `json:"items"`
 }
 
-//Object to contain item JSON
-type Item struct{
+// Object to contain item JSON
+type Item struct {
 	ShortDescription string `json:"shortDescription"`
 	Price string `json:"price"`
 }
 
-type Id struct{
+// Object to contain Id Response JSON
+type Id struct {
 	Id string `json:"id"`
 }
 
-type Points struct{
+// Object to contain Points Response JSON
+type Points struct {
 	Points int `json:"points"`
 }
 
+// Driver
 func main() {
 	fmt.Println("Starting Application...")
 	server()
@@ -46,8 +49,8 @@ func main() {
 
 }
 
-//handle post and get functions
-func server(){
+// Server call to handle router for post and get functions
+func server() {
 	var addressAndPort string = ":9000"
 
 	var receiptPoints map[string]int
@@ -55,21 +58,23 @@ func server(){
 
 	r := mux.NewRouter().StrictSlash(true)
 
-	r.HandleFunc("/receipts/{id}/process", func(wrt http.ResponseWriter, req *http.Request){
+	idregex := "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+	getPath := "/receipts/{id:" + idregex + "}/process"
+	r.HandleFunc(getPath, func(wrt http.ResponseWriter, req *http.Request){
 		params := mux.Vars(req)["id"]
-		fmt.Println("params..", params)
 		pointsResp, err := getProcess(receiptPoints, wrt, params)
 		if err != nil {
-	    	log.Println("Issue with Get Process")
+	    	log.Println("Issue with Get Process.")
 	        http.Error(wrt, err.Error(), http.StatusBadRequest)
 	    }
 		json.NewEncoder(wrt).Encode(pointsResp)
 	})
 
-	r.HandleFunc("/receipts/process", func(wrt http.ResponseWriter, req *http.Request){
+	postPath := "/receipts/process"
+	r.HandleFunc(postPath, func(wrt http.ResponseWriter, req *http.Request){
 			idResp, err := postProcess(receiptPoints, wrt , req )
 			if err != nil {
-		    	log.Println("Issue with Post Process")
+		    	log.Println("Issue with Post Process.")
 		        http.Error(wrt, err.Error(), http.StatusBadRequest)
 		    }
 			json.NewEncoder(wrt).Encode(idResp)
@@ -77,10 +82,10 @@ func server(){
 
 	http.Handle("/", r)
 
-	fmt.Println("Listening on ",addressAndPort)
-	log.Println("Listen")
+	fmt.Println("Listening on: ",addressAndPort)
 
 	err := http.ListenAndServe(addressAndPort, r)
+
 	if errors.Is(err, http.ErrServerClosed) {
 		fmt.Printf("server closed\n")
 	} else if err != nil {
@@ -89,26 +94,34 @@ func server(){
 
 }
 
-func postProcess(receiptPoints map[string]int, writer http.ResponseWriter, request *http.Request) (*Id, error){
+// Function to handle the POST call and creates and ID response for 
+// requester
+func postProcess(receiptPoints map[string]int, writer http.ResponseWriter, 
+	request *http.Request) (*Id, error) {
+	
 	idresp := &Id{ }
     receipt := &Receipt{}
     err := json.NewDecoder(request.Body).Decode(receipt)
-    log.Println("Decoded receipt")
+    
     if err != nil {
-    	log.Println("Issue with receipt")
+    	log.Println("The receipt is invalid.")
         http.Error(writer, err.Error(), http.StatusBadRequest)
         return idresp, err
     }
 
-    fmt.Println("got receipt:", receipt)
+    if !verifyReceipt(receipt){
+    	log.Println("The receipt is invalid.")
+        http.Error(writer, err.Error(), http.StatusBadRequest)
+        return idresp, err
+    }
+
+    fmt.Println("Processing receipt")
     writer.WriteHeader(http.StatusCreated)
 
     //store uuid and points total
     uuid := genUuid()
 	receiptPoints[uuid] = processReceipt(receipt); 
  	
- 	fmt.Println("Recipt ID, Points:", receiptPoints)
-
     //build uuid response
     idresp.Id = uuid
 
@@ -121,15 +134,88 @@ func postProcess(receiptPoints map[string]int, writer http.ResponseWriter, reque
     return idresp, err
 }
 
-//Generate a random UUID to map to points total
+// Verify Receipt to ensure it is valid.
+func verifyReceipt(receiptJson *Receipt) bool {
+	fmt.Println("Verifying Receipt")
+
+	const companyPattern := "^[\\w\\s\\-&]+$"
+	const timePattern = "15:04"
+	const datePattern := "2024-12-08"
+	const totalPattern := "^\\d+\\.\\d{2}$"
+
+	var companyName string = receiptJson.Retailer
+	var date string = receiptJson.PurchaseDate
+	var time string = receiptJson.PurchaseTime
+	var purchaseTotal string = receiptJson.Total
+
+
+	res1, err := regexp.MatchString(companyPattern, companyName)
+	if err != nil {
+	    fmt.Println(err)
+	    return false
+	}
+
+	dateP, err := time.Parse(datePattern, date)
+	if err != nil {
+	    fmt.Println(err)
+	    return false
+	}
+
+	timeP, err := time.Parse(timePattern, time)
+	if err != nil {
+	    fmt.Println(err)
+	    return false
+	}
+
+	totalP, err := time.Parse(totalPattern, purchaseTotal)
+	if err != nil {
+	    fmt.Println(err)
+	    return false
+	}
+
+	if !verifyLineItems(receiptJson.Items) {
+	    return false
+	}
+
+	return true
+}
+
+// Verify each line item to ensure they are valid.
+func verifyLineItems(elem []Item) bool {
+	fmt.Println("Verifying Line Items")
+
+	descriptionPattern := "^[\\w\\s\\-]+$"
+	totalPattern := "^\\d+\\.\\d{2}$"
+
+	for _, e := range elem{
+
+		res1, err :=regexp.MatchString(descriptionPattern, e.ShortDescription)
+		if err != nil {
+		    fmt.Println(err)
+		    return false
+		}
+
+		res2, err :=regexp.MatchString(totalPattern, e.Price)
+		if err != nil {
+		    fmt.Println(err)
+		    return false
+		}
+			
+	}
+	return true;
+}
+
+// Generate a random UUID to map to points total
 func genUuid() string {
     id := uuid.New()
     fmt.Println(id.String())
     return id.String()
 }
 
-//Create a JSON response and return to requestor with points count
-func getProcess(receiptPoints map[string]int, writer http.ResponseWriter, id string) (*Points, error){
+// Handles the GET call and creates a JSON response and 
+// return to requestor with points count
+func getProcess(receiptPoints map[string]int, 
+	writer http.ResponseWriter, id string) (*Points, error){
 
 	response := &Id{
 		Id: id,
@@ -139,7 +225,13 @@ func getProcess(receiptPoints map[string]int, writer http.ResponseWriter, id str
 		Points: receiptPoints[response.Id],
 	}
 
-    fmt.Println("got points:", totalPoints)
+	val, exists := receiptPoints[response.Id]
+	if !exists {
+		log.Println("No receipt found for that ID.")
+        http.Error(writer, err.Error(), http.StatusBadRequest)
+        return totalPoints, err
+	}
+
     writer.WriteHeader(http.StatusCreated)
 
     totalPointsResponse := new(bytes.Buffer)
@@ -152,52 +244,52 @@ func getProcess(receiptPoints map[string]int, writer http.ResponseWriter, id str
 }
 
 // Handles receipt processing and tabulation of total for response.
-//Place ID into memory
-func processReceipt(receiptJson *Receipt) int{
-	fmt.Println("Processing Receipt")
-
+// Place ID into memory
+func processReceipt(receiptJson *Receipt) int {
 	var totalPoints int = 0;
 
-	var companyName string = receiptJson.Retailer;
-	var date string = receiptJson.PurchaseDate;
-	var time string = receiptJson.PurchaseTime;
-	var purchaseTotal string = receiptJson.Total;
+	var companyName string = receiptJson.Retailer
+	var date string = receiptJson.PurchaseDate
+	var time string = receiptJson.PurchaseTime
+	var purchaseTotal string = receiptJson.Total
 
-	totalPoints += processName(companyName);
-	fmt.Println("Processing Receipt:",totalPoints)
+	totalPoints += processName(companyName)
+
 	if(date != "" && time != ""){
-		fmt.Println("Time and Date", date, time)
-		totalPoints += processDateTime(date, time);
+		totalPoints += processDateTime(date, time)
 	}
-	fmt.Println("Processing Receipt:",totalPoints)
+
 	if(purchaseTotal != ""){
-		fmt.Println("Purchase Total", purchaseTotal)
-		totalPoints += processTotal(purchaseTotal);
+		totalPoints += processTotal(purchaseTotal)
 	}
-	fmt.Println("Processing Receipt:",totalPoints)
 
-	totalPoints += processLineItems(receiptJson.Items);
-	fmt.Println("Processing Receipt:",totalPoints)
+	totalPoints += processLineItems(receiptJson.Items)
 
-	return totalPoints;
+	return totalPoints
 
 }
 
-//One point for each alphanumeric character in name.
+// Tabulates points for Name 
+// One point for each alphanumeric character in name.
 func processName(companyName string) int{
-	var points int = 0;
-	var regexPattern string = "[A-Za-z0-9]";
+	fmt.Println("Processing Company Name")
+
+	var points int = 0
+	var regexPattern string = "[A-Za-z0-9]"
 	pattern := regexp.MustCompile(regexPattern)
 	matches := pattern.FindAllString(companyName, -1)
 
-	points = points+len(matches)
+	points += len(matches)
 
-	return points;
+	return points
 }
 
-//6 points if the day in the purchase date is odd.
-//10 points if the time of purchase is after 2:00pm and before 4:00pm.
+// Tabulates points for Time and Date
+// 6 points if the day in the purchase date is odd.
+// 10 points if the time of purchase is after 2:00pm and before 4:00pm.
 func processDateTime(dt string, tm string) int{
+	fmt.Println("Processing Date and Time")
+
 	var points int = 0;
 	const layout = "15:04"
 
@@ -221,29 +313,30 @@ func processDateTime(dt string, tm string) int{
 		fmt.Println("Time Parse Error:", err)
 	} 
 
-	fmt.Println("Date time:", numDay, timeParsed)
-
 	if(numDay % 2 != 0){
 
-		points=points+6;
+		points += 6;
 		fmt.Println("Adding six points:", points)
 	}
 
 	if(timeParsed.After(lowestTime) && timeParsed.Before(highestTime)){
-		points=points+10;
+		points += 10;
 		fmt.Println("Adding ten points:", points)
 	}
 
 	return points;
 }
 
-//50 points if the total is a round dollar amount with no cents.
-//25 points if the total is a multiple of 0.25.
+// Tabulates points for Total cost
+// 50 points if the total is a round dollar amount with no cents.
+// 25 points if the total is a multiple of 0.25.
 func processTotal(purchaseTotal string) int{
-	var points int = 0;
+	fmt.Println("Processing Total")
+
+	var points int = 0
 
 	if(strings.Contains(purchaseTotal, (".00"))){
-		points += 50;
+		points += 50
 	}
 
 	fltTotal, err := strconv.ParseFloat(purchaseTotal, 64) 
@@ -253,24 +346,26 @@ func processTotal(purchaseTotal string) int{
 	} 
 
 	if( math.Mod(fltTotal, .25 ) == 0){
-		points += 25;
+		points += 25
 	}
 
 	return points;
 }
 
-//5 points for every two items on the receipt.
-//If the trimmed length of the item description is a multiple of 3, 
+// Tabulates points for each line item
+// 5 points for every two items on the receipt.
+// If the trimmed length of the item description is a multiple of 3, 
 // multiply the price by 0.2 and round up to the nearest integer. 
 // The result is the number of points earned.
 func processLineItems(elem []Item) int{
-	fmt.Println("Processing Line Items:",elem)
+	fmt.Println("Processing Line Items")
+
 	var points int = (len(elem)/2)*5;
-	fmt.Println("Processing Line Points:",points)
+
 	for _, e := range elem{
-		fmt.Println("Processing Line Item:",e.ShortDescription, e.Price)
+
 		var desc string = strings.TrimSpace(e.ShortDescription)
-		fmt.Println("Processing Line desc:",len(desc))
+
 		if(len(desc)%3 == 0){
 			num, err := strconv.ParseFloat(e.Price, 64) 
 
@@ -280,11 +375,9 @@ func processLineItems(elem []Item) int{
 			} else {
 				increased := num * 0.2
 				points += int(math.Ceil(increased))
-				fmt.Println("Processing Line total:",points)
 			}
 			
 		}
 	}
-	fmt.Println("Processing Line Items:",points)
-	return points;
+	return points
 }
