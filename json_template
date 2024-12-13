@@ -1,0 +1,24 @@
+{
+  "retailer": "Hobby Town USA",
+  "purchaseDate": "2024-12-22",
+  "purchaseTime": "14:15",
+  "items": [
+    {
+      "shortDescription": "Losi 5IVE-T 2.0 V2",
+      "price": "1599.99"
+    },{
+      "shortDescription": "Spektrum RC 2S Smart LiPo Battery Pack",
+      "price": "46.99"
+    },{
+      "shortDescription": "Losi Starter Drive Belt: 8B/8T 2.0",
+      "price": "11.99"
+    },{
+      "shortDescription": "Runcam Phoenix 2 Nano FPV Camera",
+      "price": "29.99"
+    },{
+      "shortDescription": "   EMAX Transporter 2 Analog FPV 5.8GHz ",
+      "price": "98.99"
+    }
+  ],
+  "total": "1728.97"
+}
