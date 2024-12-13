@@ -1,12 +1,13 @@
-FROM golang:1.19.4
+# syntax=docker/dockerfile:1
+FROM golang:1.23.4
 
-WORKDIR $GOPATH/src
+WORKDIR $GOPATH/app
 
-COPY . .
+RUN go build -o ~/GIT/receipts.go
 
+COPY go.mod go.sum ./
 RUN go mod download
-RUN go build -o ~/GIT
 
 EXPOSE 8080
 
-CMD ["~/GIT"]
+CMD ["~/GIT/receipts"]

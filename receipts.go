@@ -13,6 +13,7 @@ import (
     "github.com/google/uuid"
     "github.com/gorilla/mux"
     "time"
+    "errors"
 )
 
 //Object to contain receipt JSON
@@ -20,13 +21,13 @@ type Receipt struct{
 	Retailer string `json:"retailer"`
 	PurchaseDate string `json:"purchaseDate"`
 	PurchaseTime string `json:"purchaseTime"`
-	Total string `json:"title"`
+	Total string `json:"total"`
 	Items []Item `json:"items"`
 }
 
 //Object to contain item JSON
 type Item struct{
-	ShortDescription string `json:"ShortDescription"`
+	ShortDescription string `json:"shortDescription"`
 	Price string `json:"price"`
 }
 
@@ -40,35 +41,51 @@ type Points struct{
 
 func main() {
 	fmt.Println("Starting Application...")
-	go server()
+	server()
 	time.Sleep(time.Second)
 
 }
 
 //handle post and get functions
 func server(){
+	var addressAndPort string = ":9000"
 
 	var receiptPoints map[string]int
 	receiptPoints = make(map[string]int)
 
-	r := mux.NewRouter()
+	r := mux.NewRouter().StrictSlash(true)
 
-	r.HandleFunc("/receipts/process", func(w http.ResponseWriter, r *http.Request){
-			postProcess(receiptPoints, w , r )
-		})
+	r.HandleFunc("/receipts/{id}/process", func(wrt http.ResponseWriter, req *http.Request){
+		params := mux.Vars(req)["id"]
+		fmt.Println("params..", params)
+		pointsResp, err := getProcess(receiptPoints, wrt, params)
+		if err != nil {
+	    	log.Println("Issue with Get Process")
+	        http.Error(wrt, err.Error(), http.StatusBadRequest)
+	    }
+		json.NewEncoder(wrt).Encode(pointsResp)
+	})
 
-	r.HandleFunc("/recipts/{id:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}}/process", 
-		func(wrt http.ResponseWriter, req *http.Request){
-			params := mux.Vars(req)["id"]
-			getProcess(receiptPoints, wrt, params)
+	r.HandleFunc("/receipts/process", func(wrt http.ResponseWriter, req *http.Request){
+			idResp, err := postProcess(receiptPoints, wrt , req )
+			if err != nil {
+		    	log.Println("Issue with Post Process")
+		        http.Error(wrt, err.Error(), http.StatusBadRequest)
+		    }
+			json.NewEncoder(wrt).Encode(idResp)
 		})
 
 	http.Handle("/", r)
 
-	fmt.Println("Listening on :9001...")
-	log.Print("Listen")
+	fmt.Println("Listening on ",addressAndPort)
+	log.Println("Listen")
 
-	log.Println(http.ListenAndServe(":9000" , nil))
+	err := http.ListenAndServe(addressAndPort, r)
+	if errors.Is(err, http.ErrServerClosed) {
+		fmt.Printf("server closed\n")
+	} else if err != nil {
+		fmt.Printf("error listening for server: %s\n", err)
+	}
 
 }
 
@@ -76,7 +93,9 @@ func postProcess(receiptPoints map[string]int, writer http.ResponseWriter, reque
 	idresp := &Id{ }
     receipt := &Receipt{}
     err := json.NewDecoder(request.Body).Decode(receipt)
+    log.Println("Decoded receipt")
     if err != nil {
+    	log.Println("Issue with receipt")
         http.Error(writer, err.Error(), http.StatusBadRequest)
         return idresp, err
     }
@@ -87,6 +106,8 @@ func postProcess(receiptPoints map[string]int, writer http.ResponseWriter, reque
     //store uuid and points total
     uuid := genUuid()
 	receiptPoints[uuid] = processReceipt(receipt); 
+ 	
+ 	fmt.Println("Recipt ID, Points:", receiptPoints)
 
     //build uuid response
     idresp.Id = uuid
@@ -95,10 +116,6 @@ func postProcess(receiptPoints map[string]int, writer http.ResponseWriter, reque
     err = json.NewEncoder(idJSON).Encode(idresp)
     if err != nil {
         return idresp, err
-    }
-
-    if err := http.ListenAndServe(":8080", nil); err != http.ErrServerClosed {
-        panic(err)
     }
 
     return idresp, err
@@ -112,7 +129,7 @@ func genUuid() string {
 }
 
 //Create a JSON response and return to requestor with points count
-func getProcess(receiptPoints map[string]int, writer http.ResponseWriter, id string) error{
+func getProcess(receiptPoints map[string]int, writer http.ResponseWriter, id string) (*Points, error){
 
 	response := &Id{
 		Id: id,
@@ -128,19 +145,16 @@ func getProcess(receiptPoints map[string]int, writer http.ResponseWriter, id str
     totalPointsResponse := new(bytes.Buffer)
     err := json.NewEncoder(totalPointsResponse).Encode(totalPoints)
     if err != nil {
-        return err
+        return totalPoints, err
     }
 
-    if err := http.ListenAndServe(":8080", nil); err != http.ErrServerClosed {
-        panic(err)
-    }
-
-    return err
+    return totalPoints ,err
 }
 
 // Handles receipt processing and tabulation of total for response.
 //Place ID into memory
 func processReceipt(receiptJson *Receipt) int{
+	fmt.Println("Processing Receipt")
 
 	var totalPoints int = 0;
 
@@ -150,10 +164,20 @@ func processReceipt(receiptJson *Receipt) int{
 	var purchaseTotal string = receiptJson.Total;
 
 	totalPoints += processName(companyName);
-	totalPoints += processDateTime(date, time);
-	totalPoints += processTotal(purchaseTotal);
+	fmt.Println("Processing Receipt:",totalPoints)
+	if(date != "" && time != ""){
+		fmt.Println("Time and Date", date, time)
+		totalPoints += processDateTime(date, time);
+	}
+	fmt.Println("Processing Receipt:",totalPoints)
+	if(purchaseTotal != ""){
+		fmt.Println("Purchase Total", purchaseTotal)
+		totalPoints += processTotal(purchaseTotal);
+	}
+	fmt.Println("Processing Receipt:",totalPoints)
 
 	totalPoints += processLineItems(receiptJson.Items);
+	fmt.Println("Processing Receipt:",totalPoints)
 
 	return totalPoints;
 
@@ -175,7 +199,7 @@ func processName(companyName string) int{
 //10 points if the time of purchase is after 2:00pm and before 4:00pm.
 func processDateTime(dt string, tm string) int{
 	var points int = 0;
-	const layout = "03:04"
+	const layout = "15:04"
 
 	timeParsed, err := time.Parse(layout, tm)
 	if err != nil {
@@ -192,16 +216,22 @@ func processDateTime(dt string, tm string) int{
 		fmt.Println("Time Parse Error:", err)
 	} 
 	
-	numDay, err := strconv.Atoi(dt[5:7])
+	numDay, err := strconv.Atoi(dt[4:7])
 	if err != nil {
 		fmt.Println("Time Parse Error:", err)
 	} 
-	if(numDay % 2 == 0){
-		points+=6;
+
+	fmt.Println("Date time:", numDay, timeParsed)
+
+	if(numDay % 2 != 0){
+
+		points=points+6;
+		fmt.Println("Adding six points:", points)
 	}
 
 	if(timeParsed.After(lowestTime) && timeParsed.Before(highestTime)){
-		points+=10;
+		points=points+10;
+		fmt.Println("Adding ten points:", points)
 	}
 
 	return points;
@@ -234,11 +264,13 @@ func processTotal(purchaseTotal string) int{
 // multiply the price by 0.2 and round up to the nearest integer. 
 // The result is the number of points earned.
 func processLineItems(elem []Item) int{
-	var points int = len(elem)/2;
-
+	fmt.Println("Processing Line Items:",elem)
+	var points int = (len(elem)/2)*5;
+	fmt.Println("Processing Line Points:",points)
 	for _, e := range elem{
+		fmt.Println("Processing Line Item:",e.ShortDescription, e.Price)
 		var desc string = strings.TrimSpace(e.ShortDescription)
-		
+		fmt.Println("Processing Line desc:",len(desc))
 		if(len(desc)%3 == 0){
 			num, err := strconv.ParseFloat(e.Price, 64) 
 
@@ -247,10 +279,12 @@ func processLineItems(elem []Item) int{
 				fmt.Println("Error:", err)
 			} else {
 				increased := num * 0.2
-				points += int(increased+0.5)
+				points += int(math.Ceil(increased))
+				fmt.Println("Processing Line total:",points)
 			}
 			
 		}
 	}
+	fmt.Println("Processing Line Items:",points)
 	return points;
 }
